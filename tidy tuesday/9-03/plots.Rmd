@@ -1,0 +1,379 @@
+---
+title: "Formula 1"
+author: "Joshua Allen"
+date: "9/6/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+pacman::p_load("tidyverse", "patchwork", "ggridges", "ggbeeswarm", "httr", "tidytuesdayR", "ggstream", "lubridate", "rcartocolor", "showtext", "ggtext", "gameofthrones", "viridis")
+
+tuesdata <- tidytuesdayR::tt_load(2021, week = 37)
+
+results <- tuesdata$results
+
+circuits = tuesdata$circuits %>% 
+  rename(circuit_name = name,
+         circuit_url = url)
+
+races = tuesdata$races %>% 
+  rename(race_name = name,
+         race_url = url)
+
+qual = tuesdata$qualifying
+
+standings = tuesdata$driver_standings
+
+drivers = tuesdata$drivers %>% 
+  rename(driver_url = url)
+
+constructors = tuesdata$constructor_results
+
+seasons = tuesdata$seasons %>% 
+  rename(season_url = url)
+
+pit_stop = tuesdata$pit_stops
+
+## figure out how to add constructor
+data_raw = standings %>% 
+  left_join(races, constructors, by = "raceId") %>% 
+  left_join(drivers, qual,  by = "driverId") %>% 
+  left_join(circuits, by = "circuitId") 
+
+
+
+race_data = drivers %>% 
+  left_join(pit_stop, qual, by = "driverId")
+
+
+  
+
+theme_allen = function(){
+  theme_minimal(base_family = "Roboto Condensed", 
+                base_size = 12)  +
+    theme(axis.ticks = element_line(colour='black'),
+          plot.background = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.grid.major = element_line(linetype = "dotted", 
+                                          color = "#BBBBBB"),
+          legend.background = element_rect(color = "white"),
+          legend.title = element_text(face = "bold"),
+          axis.title.x = element_text(margin = margin(t = 10), hjust = 0),
+          axis.title.y = element_text(margin = margin(r = 10), hjust = 1),
+          strip.background = element_rect(fill = "white", color = NA),
+          panel.border = element_rect(color = "grey90", fill = NA))
+  
+}
+
+
+
+
+```
+
+
+
+```{r pit-by-driver}
+
+
+
+graph_races = race_data %>% 
+  group_by(nationality) %>% 
+  summarise(total = n()) %>% 
+  filter(total > 200)
+
+
+
+```
+
+
+
+```{r}
+
+nationality = ggplot(graph_races, aes(x = total, y = fct_reorder(nationality,total), fill = nationality)) +
+  geom_col() +
+  geom_text(aes(label = total), nudge_x = -41.0, color = "white" ) +
+  guides(fill = "none") +
+  labs(x = "Number of Drivers", y = NULL, title = "Drivers by nationality") +
+  scale_fill_got_d(option = "Tully", direction = 1) +
+  theme_allen()
+nationality
+
+ggsave("nationality.png", nationality, dpi = 500, bg = "#FFFFFF" )
+
+```
+
+
+
+
+
+
+```{r pit-stop}
+
+pit_stop = race_data %>% 
+  filter(!is.na(stop)) %>% 
+  mutate(seconds = milliseconds/10000) %>% 
+  group_by(surname) %>% 
+  summarise(mean_stop = mean(seconds)) %>% 
+  ungroup() %>% 
+  filter(mean_stop < 4.5)
+  
+
+
+ggplot(pit_stop, aes(x = mean_stop, y =  fct_reorder(surname, mean_stop, 
+                                                     .desc = TRUE))) +
+  geom_col() +
+  labs(y = NULL, x = "Stop Time in Seconds") +
+  theme_allen()
+
+
+
+
+```
+
+
+```{r}
+
+driver_results_raw = standings %>% 
+  left_join(races, by = "raceId") %>% 
+  left_join(drivers, by = "driverId")
+
+colSums(is.na(driver_results_raw))
+
+driver = driver_results_raw %>% 
+  filter(wins == 1 ) %>% 
+  count(nationality) %>% 
+  filter(n > 100) %>% 
+  mutate(lab = paste0(nationality, " ", "(",n,")")) %>% 
+  mutate(lab = fct_inorder(lab))
+
+driver2 = driver_results_raw %>% 
+  filter(nationality %in% driver$nationality) %>% 
+  filter(year < 2021) %>% 
+  group_by(nationality, year) %>% 
+  tally(wins)
+
+
+
+```
+
+```{r}
+
+ggplot(driver2, aes(x = year, y =  n , 
+                    fill = factor(nationality, levels = driver$nationality))) +
+  geom_stream() +
+  scale_fill_carto_d(palette = "Prism", labels = driver$lab, direction = -1) +
+  scale_x_continuous(breaks = c(1950, 1965, 1995, 2010, 2020),
+                     expand = c(0.01, 0.01)) +
+  labs(fill = "Nationality") +
+  guides( fill = guide_legend(nrow =1, byrow = TRUE, label.position = "bottom")) +
+  theme_allen() +
+  theme(legend.position = "top",
+        legend.key.height = unit (0.5, "lines"),
+        legend.key.width = unit(3.75, "lines"),
+        legend.text = element_text(size = 7.3)) 
+
+
+
+
+
+
+```
+
+
+
+
+```{r}
+plot_data <- left_join(left_join(filter(results, positionText == 1), races, by="raceId"), constructors, by="constructorId")
+
+mean_data <- plot_data %>% group_by(year) %>% summarise(mean=mean(as.numeric(milliseconds)))
+
+plot_data2 <- plot_data %>% 
+  filter(race_name %in% c("Monaco Grand Prix", "British Grand Prix", "Italian Grand Prix", "French Grand Prix", "German Grand Prix")) 
+
+ 
+```
+
+
+
+```{r}
+p1 <- ggplot() +
+  geom_line(mean_data, mapping=aes(x=year, y=mean/1000/60/60), colour="white", size=1.5) +
+  geom_point(plot_data, mapping=aes(x=year, y=(((as.numeric(milliseconds)/1000)/60)/60), colour=nationality)) +
+  labs(x="", y="Winning Time (hours)\n", title="Formula 1 Winning Times") +
+  scale_colour_carto_d(name = "Nationality of Constructor", palette = "Prism") +
+  guides(colour = guide_legend(title.position = "top")) +
+  theme(plot.background = element_rect(fill = "#192841", colour="#192841"),
+        panel.background = element_rect(fill = "#192841", colour="#192841"),
+        legend.background = element_rect(fill = "#192841"),
+        strip.background =element_rect(fill="#192841"),
+        strip.text = element_text(colour = '#ffc200', family="Lato", size=12),
+        legend.key = element_rect(fill = "#192841", colour="#192841"), 
+        legend.text =  element_text(colour = '#ffc200', size=12, family="Lato"),
+        legend.title =  element_text(colour = '#ffc200', size=12, family="Candara", hjust=0.5),
+        plot.title = element_text(colour = '#ffc200', size=24, face="bold", hjust = 0, family="Lato"),
+        plot.subtitle = element_text(colour = '#ffc200', size=14, hjust = 0, family="Lato"),
+        plot.caption = element_text(colour = '#ffc200', size=12, hjust = 1, family="Lato"),
+        legend.position="bottom",
+        plot.margin = unit(c(0.3, 0.6, 0.3, 0.3), "cm"), #top, right, bottom, left
+        axis.title= element_text(colour = '#ffc200', size=10, hjust = 0.5, family="Lato"),
+        axis.text = element_text(colour = '#ffc200', size=10, hjust = 0.5, family="Lato"),
+        panel.grid.minor = element_blank(), 
+        panel.grid.major = element_line(colour=alpha('#ffc200', 0.2)))
+p1
+
+
+p2 <- ggplot(plot_data2, aes(x=year, y=(((as.numeric(milliseconds)/1000)/60)/60), fill=name.x, group=name.x)) +
+  geom_area(aes(group=name.x), color=NA) +
+  scale_colour_carto_d(name = "", palette = "Prism") +
+  facet_grid(~name.x) +
+  scale_x_continuous(breaks=c(1980, 2020)) +
+  labs(x="", y="Winning Time (hours)\n", subtitle="", caption="N.Rennie | Data: Ergast API") +
+  theme(plot.background = element_rect(fill = "#192841", colour="#192841"),
+        panel.background = element_rect(fill = "#192841", colour="#192841"),
+        legend.background = element_rect(fill = "#192841"),
+        strip.background =element_rect(fill="#192841"),
+        strip.text = element_text(colour = '#ffc200', family="Candara", size=12),
+        legend.key = element_rect(fill = "#192841", colour="#192841"), 
+        legend.text =  element_text(colour = '#ffc200', size=12, family="Lato"),
+        legend.title =  element_text(colour = '#ffc200', size=12, family="Candara", hjust=0.5),
+        plot.title = element_text(colour = '#ffc200', size=24, face="bold", hjust = 0, family="Lato"),
+        plot.subtitle = element_text(colour = '#ffc200', size=14, hjust = 0, family="Lato"),
+        plot.caption = element_text(colour = '#ffc200', size=12, hjust = 1, family="Lato"),
+        legend.position="none",
+        plot.margin = unit(c(0.3, 0.6, 0.3, 0.3), "cm"), #top, right, bottom, left
+        axis.title= element_text(colour = '#ffc200', size=10, hjust = 0.5, family="Lato"),
+        axis.text = element_text(colour = '#ffc200', size=10, hjust = 0.5, family="Lato"),
+        panel.grid.minor = element_blank(), 
+        panel.grid.major = element_line(colour=alpha('#ffc200', 0.2)))
+p2          
+
+#join plots
+p <-  p1 + p2 + plot_layout(ncol = 1) &
+  theme(panel.background = element_rect(fill = "#192841", colour="#192841"),
+        plot.background = element_rect(fill = "#192841", colour="#192841"))
+
+p
+
+```
+
+
+
+```{r works}
+races <- tuesdata$races
+results <- tuesdata$results
+drivers = tuesdata$drivers
+
+
+
+
+curr_points_system <- results %>% 
+  filter(raceId == max(raceId)) %>% 
+  filter(points > 0) %>% 
+  select(positionOrder, points)
+
+#combine results with current points system, driver DOB, and race date
+f1_points_age <- results %>% 
+  left_join(races, by = "raceId") %>% 
+  left_join(drivers, by = "driverId") %>% 
+  unite(driver_name, c("forename", "surname"), sep = " ") %>% 
+  left_join(curr_points_system) %>% 
+  mutate(points = replace_na(points, 0)) %>% 
+  mutate(age = as.double(date - dob)/365.25) %>% 
+  select(resultId, driver_name, points, age) %>%
+  arrange(age) %>% 
+  group_by(driver_name) %>% 
+  mutate(cumulative_points = cumsum(points)) %>% 
+  select(-points)
+
+
+f1_points_age %>% 
+  filter(driver_name == "Max Verstappen") %>% 
+  summarise(max(age))
+
+
+
+f1_points_age %>% 
+  ggplot(aes(x = age, y = cumulative_points)) +
+  scale_x_continuous(breaks = c(20, 30, 40, 50), labels = paste(seq(20, 50, by = 10), "years old")) +
+  geom_line(aes(group = driver_name, color = driver_name)) +
+  scale_color_manual(values = c("Max Verstappen" = "#FF9B00",
+                                "Lewis Hamilton" = "#00D2BE",
+                                "Sebastian Vettel" = "#DC0000")) +
+  annotate("text", y = 1400, x = 23, label = "Max Verstappen", family = "Roboto Condensed", fontface = "bold", color = "#FF9B00", vjust = 0, hjust = 1, lineheight = 1) +
+  annotate("text", y = 3950, x = 37.5, label = "Lewis Hamilton", family = "Roboto Condensed", fontface = "bold", color = "#00D2BE", vjust = 0, hjust = 0, lineheight = 1) +
+  annotate("text", y = 3000, x = 35, label = "Sebastian Vettel", family = "Roboto Condensed", fontface = "bold", color = "#DC0000", vjust = 0, hjust = 0, lineheight = 1) +
+  annotate("text", y = 4000, x = 24.2, label = "Before the age of 24,\nMax Verstappen has earned\n1,386.5 points.\n\nBy 24, Sebastian Vettel\nearned 567 points, and\nLewis Hamilton earned\n207 points.", family = "Roboto Condensed", color = "#292929", vjust = 1, hjust = 0, lineheight = 1) +
+  geom_vline(xintercept = 23.9, size = .5, color = "#f77f00", linetype="dashed") +
+  annotate("point", y = 1386, x = 23.9, color = "#FF9B00", size = 3) +
+  annotate("point", y = 567, x = 23.9, color = "#DC0000", size = 3) +
+  annotate("point", y = 207, x = 23.9, color = "#00D2BE", size = 3) +
+  labs(x = "Driver Age",
+       y = "Cumulative F1 Points",
+       title = "Will <span style = 'color:#FF9B00;'>Max Verstappen's</span> quick rise at a young age lead him to <br>be the all time points leader in Formula 1 history?",
+       caption = "note: points are based on the current points scoring system and do not include
+       points for fastest lap or sprint qualifying.
+       
+       data source: Ergast API via Sara Stoudt and Data is Plural
+       analysis and visualization for #tidytuesday by @mikemaieli") +
+ theme_allen() +
+  theme(plot.title = element_markdown(),
+        plot.subtitle = element_markdown(),
+        legend.position = "none")
+
+```
+
+```{r}
+f1_points_age %>% 
+  filter(driver_name %in% c( "Max Verstappen", "Michael Schumacher","Kimi Räikkönen" )) %>% 
+  summarise(max(age))
+
+check = f1_points_age %>% 
+  filter(driver_name %in% c( "Max Verstappen", "Michael Schumacher","Kimi Räikkönen" ))
+
+
+
+```
+
+
+
+
+
+```{r}
+points_age = f1_points_age %>% 
+  ggplot(aes(x = age, y = cumulative_points)) +
+  scale_x_continuous(breaks = c(20, 30, 40, 50), labels = paste(seq(20, 50, by = 10), "years old")) +
+  geom_line(aes(group = driver_name, color = driver_name)) +
+  scale_color_manual(values = c("Max Verstappen" = "#FF9B00",
+                                "Lewis Hamilton" = "#00D2BE",
+                                "Sebastian Vettel" = "#DC0000",
+                                "Michael Schumacher" = "#C582B2",
+                               "Kimi Räikkönen" = "#2F3D70")) +
+  annotate("text", y = 1400, x = 23, label = "Max Verstappen", family = "Roboto Condensed", fontface = "bold", color = "#FF9B00", vjust = 0, hjust = 1, lineheight = 1) +
+  annotate("text", y = 3950, x = 37.5, label = "Lewis Hamilton", family = "Roboto Condensed", fontface = "bold", color = "#00D2BE", vjust = 0, hjust = 0, lineheight = 1) +
+  annotate("text", y = 3000, x = 35, label = "Sebastian Vettel", family = "Roboto Condensed", fontface = "bold", color = "#DC0000", vjust = 0, hjust = 0, lineheight = 1) +
+  annotate("text", y = 1566, x = 43.89, label = "Michael Schumaker", family = "Roboto Condensed", fontface = "bold", color = "#C582B2", vjust = 0, hjust = 0, lineheight = 1) +
+   annotate("text", y = 1865, x = 41.86, label = "Kimi Räikkönen", family = "Roboto Condensed", fontface = "bold", color = "#2F3D70", vjust = 0, hjust = 0, lineheight = 1) +
+  annotate("text", y = 4000, x = 24.2, label = "Before the age of 24,\nMax Verstappen has earned\n1,386.5 points.\n\nBy 24, Sebastian Vettel\nearned 567 points, and\nLewis Hamilton earned\n207 points.", family = "Roboto Condensed", color = "#292929", vjust = 1, hjust = 0, lineheight = 1) +
+  geom_vline(xintercept = 23.9, size = .5, color = "#f77f00", linetype="dashed") +
+  annotate("point", y = 1386, x = 23.9, color = "#FF9B00", size = 3) +
+  annotate("point", y = 567, x = 23.9, color = "#DC0000", size = 3) +
+  annotate("point", y = 207, x = 23.9, color = "#00D2BE", size = 3) +
+  annotate("point", y = 209, x = 23.9, color = "#C582B2", size = 3) +
+  annotate("point", y = 154, x = 23.9, color = "#2F3D70", size = 3) +
+  labs(x = "Driver Age",
+       y = "Cumulative F1 Points",
+       title = "Will Verstappen surpass the all time greats?",
+       caption = " I just wanted to add Schumaker and Räikkönen to @mikemaieli' vizualization \nplus my own theme ") +
+ theme_allen() +
+  theme(plot.title = element_markdown(),
+        plot.subtitle = element_markdown(),
+        legend.position = "none")
+
+points_age
+
+ggsave("points.png", points_age,dpi = 500 , bg = "#FFFFFF")
+
+```
+

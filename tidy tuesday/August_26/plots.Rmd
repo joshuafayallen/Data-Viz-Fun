@@ -1,0 +1,241 @@
+---
+title: "TidyTuesday 8-26"
+author: "Josh Allen"
+date: "8/26/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+pacman::p_load("tidyverse", "tidytuesdayR", "ggdist", "ggridges", "patchwork", 
+               "janitor", "skimr", "ggside", "ggbeeswarm")
+
+taxonomy = tidytuesdayR::tt_load(2021, week = 35, download_files = "taxonomy") %>% .$taxonomy
+# read lemurs file sorting out parsing failure
+lemurs = readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2021/2021-08-24/lemur_data.csv', 
+                          col_types = cols(
+                            age_of_living_y = col_double()))
+
+
+anti_join(lemurs, taxonomy) %>% 
+  distinct(taxon) %>% .$taxon
+# taxon = "CMED" in one set "CMEAD" in the other --> NA when left join
+# recode so these match
+taxonomy$taxon = 
+  taxonomy$taxon %>% 
+  fct_recode(CMED = "CMEAD")
+# join both datasets so can use common names rather than 'taxon' codes
+lemurs = lemurs %>% 
+  left_join(taxonomy) %>% 
+  select(common_name, everything())
+
+
+lemurs_clean =
+  lemurs %>% 
+  filter(
+    str_to_lower(birth_type) %in% c('cb', 'wb'),
+    str_to_lower(sex) %in% c('f', 'm'),
+  ) %>% 
+  mutate(
+    sex = recode(sex, `F` = 'Female', `M` = 'Male'),
+    birth_type = recode(birth_type, CB = 'Captive', WB = 'Wild')
+  )
+
+lemurs_age = lemurs_clean %>% 
+  filter(
+    !is.na(age_max_live_or_dead_y),
+  ) %>% 
+  mutate(
+    age_group = cut(age_max_live_or_dead_y, seq(-1, 50, 10), labels = c('0-9', '10-19', '20-29', '30-39', '40-49')),
+    age_group = recode(age_group, `(9, 19]` = '10-19')
+  ) %>% 
+  filter(
+    !age_group %in% c('0-9', '40-49'), # Remove because of small number of observations for one group
+   !common_name %in% c("hybrid", "Mohol bushbaby", "Gray mouse lemur", 
+                       "Ring-tailed lemur", "White-fronted brown lemur")) 
+
+if(!require("showtext")) {
+  print("Install the package `showtext`.")
+} else {
+  library("showtext")
+  showtext_auto()
+  font_add_google("Fira Sans", "fira_sans")
+  font_add_google("Merriweather", "merriweather")
+}
+theme_allen = function(title_pos = "center", axis_title_pos = "left", 
+                       slides = FALSE, has_subtitle = FALSE, 
+                       base_size = 14, ...){
+  
+  title_hjust <- switch(title_pos, "center" = 0.5, "left" = 0)
+  axis_title_hjust_y <- switch(axis_title_pos, "center" = 0.5, "left" = 1.0)
+  axis_title_hjust_x <- switch(axis_title_pos, "center" = 0.5, "left" = 0.0)
+  plot_bg = if_else(slides, "#ECECEC", "transparent")
+  plot_grid = if_else(slides, "grey85", "grey92")
+  title_margin = if_else(has_subtitle, "4", "16")
+  
+  
+  theme_minimal(base_family = "fira_sans", 
+                base_size = base_size)  +
+    theme(axis.ticks = element_line(colour='black'),
+          plot.background = element_blank(),
+          plot.title = ggplot2::element_text(
+      # Font
+      family = "merriweather", face = "bold", size = rel(1.285), 
+      colour = "#454545", 
+      # Center title
+      hjust = title_hjust,
+      # Margins
+      margin = ggplot2::margin(b = title_margin, unit = "pt")
+    ),
+          plot.subtitle = element_text(
+            family = "merriweather", face = "bold", size = rel(1.285), 
+            colour = "#454545", 
+            # Center title
+            hjust = title_hjust,
+            # Margins
+            margin = ggplot2::margin(b = title_margin, unit = "pt")
+          ),
+          panel.grid.minor = element_blank(),
+          panel.grid.major = element_line(linetype = "dotted", 
+                                          color = "#BBBBBB"),
+          axis.title.y = ggplot2::element_text(
+            # Right-align y axis title
+            hjust = axis_title_hjust_y,
+            # Margins
+            margin = ggplot2::margin(r = 10)
+          ),
+          axis.title.x = ggplot2::element_text(
+            # Left-align x axis title
+            hjust = axis_title_hjust_x,
+            # Margins
+            margin = ggplot2::margin(t = 10)
+          ),
+          # Axis labels
+          axis.text = ggplot2::element_text(
+            # Font
+            size = rel(.72), colour = "#212121"
+          ),
+    legend.title = ggplot2::element_text(
+      # Font
+      size = rel(.86), colour = "#454545"
+    ),
+    # Legend labels
+    legend.text = ggplot2::element_text(
+      # Font
+      size = rel(.72), colour = "#454545"
+    ),
+    legend.background = ggplot2::element_rect(
+      # No Background Colour
+      fill = "transparent", colour = NA
+    ),
+    legend.key = ggplot2::element_rect(
+      # No Background Colour
+      fill = "transparent", colour = NA
+    ),  panel.border = element_rect(color = "grey90", fill = NA),
+    strip.text = ggplot2::element_text(
+      # Font 
+      size = rel(.86), colour = "#454545", 
+      # Margin							   
+      margin = ggplot2::margin(t= 10, b= 10)
+    ),
+    strip.background = ggplot2::element_rect(
+      # No Background Colour
+      fill = "transparent", colour = NA
+    ))
+  
+}
+
+
+
+
+
+```
+
+
+```{r}
+ggplot(lemurs_clean,aes(x = weight_g, fill = birth_type)) +
+  stat_slab(alpha = 0.75) +
+  theme_allen()
+
+
+ggplot(lemurs_clean, aes(x = weight_g, y = sex, fill = birth_type)) + 
+  geom_density_ridges(alpha = 0.75) + 
+  labs(x = "Weight(g)", y = "Sex", title = "Test",  subtitle = "test") +
+  guides(fill= guide_legend(title = "Birth Type")) +
+  theme_allen() 
+
+
+
+
+
+
+
+
+```
+
+```{r ggridges-fun}
+
+
+
+
+ggplot(lemurs_age, aes(x = age_max_live_or_dead_y, y = age_group, fill = birth_type)) + 
+  geom_density_ridges()
+
+
+ggplot(lemurs_age, aes(x = age_max_live_or_dead_y, y = age_group, fill = sex)) + 
+  geom_density_ridges()
+
+ggplot(lemurs_age, aes(x = age_max_live_or_dead_y, y = common_name, fill = sex)) + 
+  geom_density_ridges(alpha = 0.75) +
+  facet_wrap(vars(birth_type)) +
+  scale_fill_manual(values = c("#FFC93C", "#DBF6E9")) +
+  labs(y = NULL, x = "Age") 
+
+
+
+ggplot(lemurs_age, aes(x = weight_g, y = common_name, fill = sex)) + 
+  geom_density_ridges(alpha = 0.75) +
+  facet_wrap(vars(birth_type)) +
+  scale_fill_manual(values = c("#DBF6E9", "#FFC93C")) +
+  labs(y = NULL, x = "Weight(g)") 
+```
+
+```{r}
+lemurs_distinct = lemurs_age %>% 
+  distinct(dlc_id, .keep_all =  TRUE ) %>% 
+  filter(common_name != "hybrid")
+
+n <- 5
+top_species <- lemurs_distinct %>%  
+  group_by(common_name) %>% 
+  count() %>% 
+  arrange(desc(n)) %>% 
+  head(n) %>% 
+  pull(common_name)
+top_species<- lemurs_distinct %>% 
+  filter(common_name %in% top_species) 
+rm(n)
+  
+life_exp <- top_species %>% 
+  filter(!is.na(dob) & !is.na(dod) & is.na(estimated_dob)) 
+
+```
+
+
+```{r}
+ggplot(life_exp, aes(x = age_max_live_or_dead_y, y = common_name)) + 
+  geom_density_ridges() +
+  facet_wrap(vars(sex)) +
+  theme_allen()
+```
+
+```{r}
+ggplot(lemurs_age, aes(x = birth_type, y = weight_g)) +
+ geom_quasirandom(size = 0.0001) +
+  facet_wrap(vars(age_group)) +
+  theme_allen()
+
+
+
+```
+
